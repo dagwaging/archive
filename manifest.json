@@ -1,0 +1,19 @@
+{
+  "name": "4chan image archiver",
+  "description": "Simple archiver extension for drawthreads",
+  "version": "0.1.0",
+  "manifest_version": 3,
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://boards.4chan.org/b/thread/*"],
+      "run_at": "document_end",
+      "js": ["archive.js"]
+    }
+  ],
+  "permissions": [
+    "downloads"
+  ]
+}
