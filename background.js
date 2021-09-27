@@ -7,7 +7,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           sendResponse(
             results.filter(
               download =>
-                download.byExtensionId == 'miffcchbbdpinjngndfpkbajigcipgll' &&
+                download.byExtensionId == chrome.runtime.id &&
                 download.exists &&
                 download.state == 'complete'
             )
