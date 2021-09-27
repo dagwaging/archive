@@ -1,15 +1,32 @@
+let filesSelector = '.file'
+let autoExpand = true
+
+if (window.location.origin !== 'https://boards.4chan.org') {
+  filesSelector = '.thread_image_box'
+  autoExpand = false
+}
+
 let names = []
 
 let addInput = (node) => {
   let container = document.createElement('div')
+  container.style.textAlign = 'left'
+
   let input = document.createElement('input')
-  let index = document.querySelectorAll('.thread .file input').length + 1
+  let index = document.querySelectorAll('.thread ' + filesSelector + ' input').length + 1
   input.tabIndex = index
 
   let suggestion = document.createElement('div')
   suggestion.style.position = 'absolute'
   suggestion.style.padding = '2px 3px'
   suggestion.style.color = 'rgba(0, 0, 0, 0.5)'
+
+  if (window.location.origin !== 'https://boards.4chan.org') {
+    suggestion.style.textAlign = 'left'
+    suggestion.style.fontSize = '13px'
+    suggestion.style.lineHeight = '18px'
+    suggestion.style.padding = '3px 4px'
+  }
 
   input.addEventListener('keyup', (event) => {
     if (event.target.value.length > 0) {
@@ -40,12 +57,19 @@ let addInput = (node) => {
       if (event.target.value.length > 0) {
         // todo: detect duplicate files in multiple folders and remove others?
         let link = event.target.parentElement.parentElement.querySelector('.fileText a')
+        let imageLinkSelector = '.fileThumb'
+
+        if (window.location.origin !== 'https://boards.4chan.org') {
+          link = event.target.parentElement.parentElement.parentElement.querySelector('a.post_file_filename')
+          imageLinkSelector = '.thread_image_link'
+        }
+
         chrome.runtime.sendMessage(
           {
             type: 'download',
             name: event.target.value,
             filename: link.title || link.text, // todo: use md5 hash as filename?
-            url: event.target.parentElement.parentElement.querySelector('.fileThumb').href
+            url: event.target.parentElement.parentElement.querySelector(imageLinkSelector).href
           },
           (error) => {
             if (error == null) {
@@ -61,7 +85,7 @@ let addInput = (node) => {
         )
       }
 
-      let next = [...document.querySelectorAll('.file input')].find(
+      let next = [...document.querySelectorAll('.thread ' + filesSelector + ' input')].find(
         input => input.tabIndex > index && !input.disabled
       )
       if (next) {
@@ -72,7 +96,7 @@ let addInput = (node) => {
 
   input.addEventListener('focus', (event) => {
     let thumb = event.target.parentElement.parentElement.querySelector('.fileThumb img')
-    if (thumb.style.display != 'none') {
+    if (thumb && thumb.style.display != 'none' && autoExpand) {
       thumb.click()
     }
 
@@ -81,7 +105,7 @@ let addInput = (node) => {
 
   input.addEventListener('blur', (event) => {
     let img = event.target.parentElement.parentElement.querySelector('.fileThumb img.expanded-thumb')
-    if (img) {
+    if (img && autoExpand) {
       img.click()
     }
     suggestion.textContent = ''
@@ -92,7 +116,7 @@ let addInput = (node) => {
   node.prepend(container)
 }
 
-document.querySelectorAll('.thread .file').forEach(addInput)
+document.querySelectorAll('.thread ' + filesSelector).forEach(addInput)
 
 // file existence is only checked once, on page load
 // only files downloaded using the extension can be detected
@@ -110,7 +134,13 @@ chrome.runtime.sendMessage(
       }
 
       // todo: check files by md5 hash rather than original url or filename?
-      let file = document.querySelector('.fileText a[href="' + result.url.replace(/^https:/, '') + '"]')
+      let linkSelector = '.fileText a[href="' + result.url.replace(/^https:/, '') + '"]'
+
+      if (window.location.origin !== 'https://boards.4chan.org') {
+        linkSelector = 'a.post_file_filename[href="' + result.url + '"]' // not the best way to do this probably
+      }
+
+      let file = document.querySelector(linkSelector)
       if (file) {
         let input = file.parentElement.parentElement.querySelector('input')
         input.value = name
@@ -125,7 +155,7 @@ new MutationObserver((mutations, observer) => {
     return mutation.type === 'childList'
   }).forEach((mutation) => {
     mutation.addedNodes.forEach((node) => {
-      let file = node.querySelector('.file')
+      let file = node.querySelector(filesSelector)
       if (file) {
         addInput(file)
       }
