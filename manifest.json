@@ -1,5 +1,6 @@
 {
   "name": "4chan image archiver",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtOg+QNBd53G5tOKVcPbxH0lXsXB+XjQeqRpLDXD3idjlV3dfJ+/X0ysLC+ITnz0/rwovwi8X7c9XLLZZpxYnnqpDd0FfhmsbxAv2iJqmr8SVheoiMAcFsKefyrnfjv4aGPV+m9Y6cR3XsnpyripFYv/iFQD+U25aaDkJGfpj4wp8l9bvmjvUaVLzyOCH3diF+UXsOblmaoZubRFQjm6xl/Uddw+e6BVoTOgNl3MkiQCtto86L0JGACCSf/djCx5AzqsiDff1JQI9cudGZTMlud0PDubsRFzpuv/QnVcR+36AMEXZWVontURjOh/4VnxJx3qU2gtCZWXAhiVWUUGhlwIDAQAB",
   "description": "Simple archiver extension for drawthreads",
   "version": "0.1.0",
   "manifest_version": 3,

@@ -1,3 +1,5 @@
+#![windows_subsystem = "windows"]
+
 use chrome_native_messaging::event_loop;
 use std::io::BufReader;
 use std::io::BufWriter;
@@ -18,6 +20,8 @@ use downloader::Downloader;
 use downloader::Download;
 use rayon::prelude::*;
 use wfd;
+use winapi::um::winuser;
+use user32;
 
 mod extension;
 
@@ -38,6 +42,12 @@ enum Message {
 }
 
 thread_local!(static TIME: RefCell<time::Instant> = RefCell::new(time::Instant::now()));
+
+unsafe fn make_things_not_look_like_shit() {
+  winapi::um::winuser::SetProcessDpiAwarenessContext(
+    winapi::shared::windef::DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
+  );
+}
 
 fn time(msg: &str) {
   TIME.with(|earlier| {
@@ -226,13 +236,31 @@ fn main() {
   time("Starting");
 
   if std::env::args().len() == 1 {
-    let name = "com.dagwaging.archive";
+    // TODO: error handling please
+    let (message, icon) = if extension::is_installed(extension::NAME) {
+      extension::uninstall(extension::NAME);
 
-    if extension::is_installed(name) {
-      extension::uninstall(name);
+      ("uninstalled", winapi::um::winuser::MB_ICONERROR)
     }
     else {
-      extension::install(name, "Simple archiver extension for drawthreads", "bnbdjefgpgplehagifjhjecifmlhhnai");
+      extension::install(
+        extension::NAME,
+        extension::DESCRIPTION,
+        extension::ID
+      );
+
+      ("installed", winapi::um::winuser::MB_ICONINFORMATION)
+    };
+
+    unsafe {
+      make_things_not_look_like_shit();
+
+      user32::MessageBoxA(
+        std::ptr::null_mut(),
+        std::ffi::CString::new(format!("Archiver native extension {}", message)).unwrap().as_ptr(),
+        std::ffi::CString::new("Archiver").unwrap().as_ptr(),
+        winapi::um::winuser::MB_OK | icon
+      );
     }
 
     /*
@@ -273,6 +301,10 @@ fn main() {
 
       match en {
         Message::Pick => {
+          unsafe {
+            make_things_not_look_like_shit();
+          }
+
           Ok(json!({
             "msg": wfd::open_dialog(
               wfd::DialogParams {
