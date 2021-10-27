@@ -9,6 +9,7 @@ dependencies = [
  "base64",
  "chrome_native_messaging",
  "downloader",
+ "exitcode",
  "md-5",
  "rayon",
  "serde",
@@ -184,6 +185,12 @@ checksum = "80df024fbc5ac80f87dfef0d9f5209a252f2a497f7f42944cff24d8253cac065"
 dependencies = [
  "cfg-if",
 ]
+
+[[package]]
+name = "exitcode"
+version = "1.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "de853764b47027c2e862a995c34978ffa63c1501f2e15f987ba11bd4f9bba193"
 
 [[package]]
 name = "fnv"

@@ -1,35 +1,38 @@
-#![windows_subsystem = "windows"]
+#![cfg_attr(debug_assertions, allow(dead_code, unused, unused_imports, unused_variables))]
+// #![windows_subsystem = "windows"]
 
 use chrome_native_messaging::event_loop;
-use std::io::BufReader;
-use std::io::BufWriter;
 use serde::Deserialize;
 use serde_json::json;
 use std::fs;
 use std::sync::Arc;
 use std::path::Path;
-use std::fs::File;
+use std::path::PathBuf;
 use std::time;
-use md5::Digest;
-use std::io::Read;
 use std::collections::HashMap;
-use std::collections::HashSet;
-use std::cell::RefCell;
+use std::process;
+use exitcode;
 use downloader::verify::Verification;
 use downloader::Downloader;
 use downloader::Download;
-use rayon::prelude::*;
 use wfd;
 use winapi::um::winuser;
 use user32;
 
 mod extension;
+mod lib;
+
+#[derive(Deserialize)]
+struct Cache {
+  as_of: time::SystemTime,
+  hashes: HashMap<String, String>
+}
 
 #[derive(Deserialize)]
 enum Message {
   Get {
     directory: String,
-    // hashes: HashSet<String>,
+    //cache: Cache
   },
   Set {
     directory: String,
@@ -41,270 +44,82 @@ enum Message {
   Pick
 }
 
-thread_local!(static TIME: RefCell<time::Instant> = RefCell::new(time::Instant::now()));
+// vulnerable to a race condition since we can't pass in a file to downloader.download()
+fn unique_filename(filename: &Path) -> Option<PathBuf> {
+  let stem = filename.file_stem()?.to_str()?;
+  let extension = filename.extension().and_then(|extension|
+    extension.to_str()
+  ).map(|extension|
+    format!(".{}", extension)
+  ).unwrap_or("".to_string());
 
-unsafe fn make_things_not_look_like_shit() {
-  winapi::um::winuser::SetProcessDpiAwarenessContext(
-    winapi::shared::windef::DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
-  );
-}
+  let mut final_filename = filename.clone().to_path_buf();
+  let mut number: u16 = 0;
 
-fn time(msg: &str) {
-  TIME.with(|earlier| {
-    let now = time::Instant::now();
-    eprintln!(
-      "{:?} microseconds elapsed\n{}",
-      now.duration_since(*earlier.borrow()).as_micros(),
-      msg
-    );
-    *earlier.borrow_mut() = now;
-  });
-}
-
-fn base64_hash(mut file: File) -> String {
-  let mut digest = md5::Md5::new();
-  let mut buffer = [0; 64 * 1024];
-  let mut bytes_read = file.read(&mut buffer).unwrap();
-
-  while bytes_read > 0 {
-    digest.update(&buffer[0..bytes_read]);
-    bytes_read = file.read(&mut buffer).unwrap();
+  while final_filename.exists() {
+    number += 1;
+    final_filename.set_file_name(format!("{} ({}){}", stem, number, extension));
   }
 
-  base64::encode(digest.finalize())
-}
-
-fn update_cache(cache: &mut HashMap<String, HashMap<String, String>>, cache_as_of: &Option<time::SystemTime>, directory: &Path) {
-  time("Checking for directory changes");
-
-  let directory_modified = directory.metadata().ok().and_then(|metadata|
-    metadata.modified().ok()
-  ).zip(*cache_as_of).map_or(true, |(modified, cache_modified)|
-    modified > cache_modified
-  );
-
-  if directory_modified {
-    time("Directory changes detected, checking subdirectories");
-
-    let subdirectories: HashSet<String> = directory.read_dir().unwrap().filter_map(|child| child.ok()).filter(|child|
-      child.file_type().map_or(false, |file_type|
-        file_type.is_dir()
-      )
-    ).map(|child| child.file_name().into_string().unwrap()).collect();
-    
-    subdirectories.iter().for_each(|subdirectory| {
-      if !cache.contains_key(subdirectory) {
-        eprintln!("Added subdirectory '{}'", subdirectory);
-        cache.insert(subdirectory.to_string(), HashMap::<String, String>::new());
-      }
-    });
-
-    cache.retain(|subdirectory, _| {
-      if subdirectories.contains(subdirectory) {
-        true
-      }
-      else {
-        eprintln!("Removed subdirectory '{}'", subdirectory);
-        false
-      }
-    });
-  }
-  else {
-    time("No directory changes detected");
-  }
-
-  for (subdirectory, cached_files) in cache.iter_mut() {
-    let subdirectory_path = directory.join(subdirectory);
-
-    let subdirectory_modified = subdirectory_path.metadata().ok().and_then(|metadata|
-      metadata.modified().ok()
-    ).zip(*cache_as_of).map_or(true, |(modified, cache_modified)|
-      modified > cache_modified
-    );
-
-    if subdirectory_modified {
-      eprintln!("Subdirectory changes detected in '{}', checking files", subdirectory);
-
-      let files: HashSet<String> = subdirectory_path.read_dir().unwrap().filter_map(|child| child.ok()).filter(|child|
-        child.file_type().map_or(false, |file_type|
-          file_type.is_file()
-        )
-      ).map(|child| child.file_name().into_string().unwrap()).collect();
-
-      files.iter().for_each(|file| {
-        if !cached_files.contains_key(file) {
-          eprintln!("Added file '{}/{}'", subdirectory, file);
-          cached_files.insert(file.to_string(), "".to_string());
-          /*
-          File::open(subdirectory_path.join(file)).map(|file_fs|
-            cached_files.insert(file.to_string(), base64_hash(file_fs))
-          ).unwrap();
-          */
-        }
-      });
-
-      cached_files.retain(|file, _| {
-        if files.contains(file) {
-          true
-        }
-        else {
-          eprintln!("Removed file '{}/{}'", subdirectory, file);
-          false
-        }
-      });
-    }
-    else {
-      eprintln!("No subdirectory changes detected in '{}'", subdirectory);
-    }
-  }
-}
-
-fn hash_files(directory: &String) -> Result<HashMap<String, String>, String> {
-  time("Reading directory");
-
-  fs::read_dir(&directory).map_err(|error|
-    format!("Unable to read '{}': {}", directory, error)
-  ).map(|files| {
-    let cache_path = Path::new(&directory).join("cache.json");
-
-    // read the cache, if possible
-    time("Reading cache");
-
-    let (cache, cache_as_of): (HashMap<String, String>, Option<time::SystemTime>) = File::open(&cache_path).map(|cache|
-      (
-        serde_json::from_reader(BufReader::new(&cache)).unwrap_or_default(),
-        cache.metadata().and_then(|metadata| metadata.modified()).ok()
-      )
-    ).unwrap_or_default();
-
-    // read files and compute checksums if necessary
-    time("Enumerating files");
-
-    let data: HashMap<String, (String, String, Option<time::SystemTime>)> = files.filter_map(|path| path.ok()).filter(|path|
-      path.file_type().map_or(false, |file_type| file_type.is_dir())
-    ).filter_map(move |path|
-      fs::read_dir(path.path()).ok().map(move |dir| {
-        dir.filter_map(move |p| p.ok().zip(path.file_name().into_string().ok())).filter(|(p, _)|
-          p.file_type().map_or(false, |file_type| file_type.is_file())
-        )
-      })
-    ).flatten().par_bridge().filter_map(|(p, name)|
-      p.path().to_str().map(|path| path.to_string()).and_then(|path| {
-        let modified = p.metadata().and_then(|metadata| metadata.modified()).ok();
-        // let modified = Some(time::SystemTime::UNIX_EPOCH);
-
-        cache.get(&path).filter(|_| {
-          cache_as_of.zip(modified).map(|(time, modified)|
-            modified < time
-          ).unwrap_or(false)
-        }).map(|hash| {
-          // eprintln!("Found '{}' in cache", path);
-          hash.to_string()
-        }).or_else(|| {
-          // eprintln!("Hashing '{}'", path);
-          // Some("".to_string())
-          File::open(p.path()).ok().map(|file|
-            base64_hash(file)
-          )
-        }).map(|hash| (path, (name, hash, modified)))
-      })
-    ).collect();
-
-    // eprintln!("Found {} files", data.len());
-
-    time("Updating cache");
-
-    let cache_data: HashMap<&String, &String> = data.iter().map(|(path, (_, hash, _))| (path, hash)).collect();
-
-    // update the cache
-    File::create(cache_path).ok().map(|cache|
-      serde_json::to_writer(BufWriter::new(cache), &cache_data)
-    );
-
-    time("Preparing output");
-
-    let mut entries: Vec<_> = data.into_iter().collect();
-
-    entries.sort_unstable_by_key(|(_, (_, _, modified))| modified.clone());
-    entries.iter().map(|(_, (name, hash, _))|
-      (hash.to_string(), name.to_string())
-    ).collect::<HashMap<String, String>>()
-  })
+  Some(final_filename)
 }
 
 fn main() {
-  time("Starting");
+  unsafe {
+    winuser::SetProcessDpiAwarenessContext(
+      winapi::shared::windef::DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
+    );
+  }
 
   if std::env::args().len() == 1 {
-    // TODO: error handling please
-    let (message, icon) = if extension::is_installed(extension::NAME) {
-      extension::uninstall(extension::NAME);
+    let install_result = extension::is_installed(extension::NAME).map_err(|err|
+      format!("Unable to check Archiver native extension installation status\n\n{}", err)
+    ).and_then(|installed|
+      if installed {
+        extension::uninstall(extension::NAME).map_or_else(
+          |err| Err(format!("Unable to uninstall Archiver native extension\n\n{}", err)),
+          |_| Ok("Archiver native extension uninstalled".to_string())
+        )
+      }
+      else {
+        extension::install(
+          extension::NAME,
+          extension::DESCRIPTION,
+          extension::ID
+        ).map_or_else(
+          |err| Err(format!("Unable to install Archiver native extension\n\n{}", err)),
+          |_| Ok("Archiver native extension installed".to_string())
+        )
+      }
+    );
 
-      ("uninstalled", winapi::um::winuser::MB_ICONERROR)
-    }
-    else {
-      extension::install(
-        extension::NAME,
-        extension::DESCRIPTION,
-        extension::ID
-      );
-
-      ("installed", winapi::um::winuser::MB_ICONINFORMATION)
+    let (message, icon, exit_code) = match install_result {
+      Ok(message) => (message, winapi::um::winuser::MB_ICONINFORMATION, exitcode::OK),
+      Err(message) => (message, winapi::um::winuser::MB_ICONERROR, exitcode::IOERR)
     };
 
-    unsafe {
-      make_things_not_look_like_shit();
+    // i solemnly swear that these strings contain no zero bytes
+    let text = std::ffi::CString::new(message).unwrap();
+    let caption = std::ffi::CString::new("Archiver").unwrap();
 
+    unsafe {
       user32::MessageBoxA(
         std::ptr::null_mut(),
-        std::ffi::CString::new(format!("Archiver native extension {}", message)).unwrap().as_ptr(),
-        std::ffi::CString::new("Archiver").unwrap().as_ptr(),
+        text.as_ptr(),
+        caption.as_ptr(),
         winapi::um::winuser::MB_OK | icon
       );
     }
 
-    /*
-    let directory = Path::new("F:\\nyu\\dataset");
-
-    let cache_path = Path::new(&directory).join("cache.json");
-
-    time("Reading cache");
-
-    let (mut cache, cache_as_of): (HashMap<String, HashMap<String, String>>, Option<time::SystemTime>) = File::open(&cache_path).map(|cache|
-      (
-        serde_json::from_reader(BufReader::new(&cache)).unwrap_or_default(),
-        cache.metadata().and_then(|metadata| metadata.modified()).ok()
-      )
-    ).unwrap_or_default();
-
-    update_cache(&mut cache, &cache_as_of, directory);
-
-    time("Updating cache");
-
-    File::create(cache_path).ok().map(|cache_file|
-      serde_json::to_writer(BufWriter::new(cache_file), &cache)
-    );
-
-    time("Done");
-    */
-
-    return;
+    process::exit(exit_code);
   }
 
   event_loop(|message| {
-    time("Got message");
-
-    let result = serde_json::from_value::<Message>(message).map_err(|error|
+    serde_json::from_value::<Message>(message).map_err(|error|
       format!("Invalid message: {}", error)
     ).and_then(|en| {
-      time("Processing message");
-
       match en {
         Message::Pick => {
-          unsafe {
-            make_things_not_look_like_shit();
-          }
-
           Ok(json!({
             "msg": wfd::open_dialog(
               wfd::DialogParams {
@@ -312,47 +127,32 @@ fn main() {
                 title: "Pick archive location",
                 ..Default::default()
               }
-            ).map(|result|
-              result.selected_file_path.to_str().unwrap().to_string()
-            ).unwrap_or("".to_string())
+            ).ok().and_then(|result|
+              result.selected_file_path.to_str().map(|path|
+                path.to_string()
+              ) // TODO: display an error and retry if the path is not valid UTF-8?
+            ).unwrap_or("".to_string()) // TODO: don't emit anything if the selection was cancelled
           }))
         },
         Message::Get { directory } => {
-          hash_files(&directory).map(|names| {
-            // output the result
-            // eprintln!("Done");
+          lib::hash_files(&directory).map(|names| {
             json!({ "msg": names })
           })
         },
         Message::Set { directory, url, hash, name, filename } => {
-          if hash_files(&directory).unwrap_or_default().get(&hash).map(|found_name| found_name.to_string() == name).unwrap_or(false) {
-            // eprintln!("File with hash '{}' already exists", hash);
+          if lib::hash_files(&directory).unwrap_or_default().get(&hash).map(|found_name| found_name.to_string() == name).unwrap_or(false) {
             return Ok(json!({ "msg": { hash: name } }))
           }
 
-          let filename_path = Path::new(&filename);
           let destination = Path::new(&directory).join(&name);
-          let mut final_filename = filename.clone();
-          let mut number: u16 = 0;
-
           fs::create_dir_all(&destination).unwrap();
 
-          while destination.join(&final_filename).exists() {
-            number += 1;
-
-            final_filename = format!(
-              "{} ({}){}",
-              filename_path.file_stem().unwrap().to_str().unwrap(),
-              number,
-              filename_path.extension().map(|extension| ".".to_string() + extension.to_str().unwrap()).unwrap_or("".to_string())
-            );
-          }
-
+          let destination_filename = unique_filename(&destination.join(filename)).unwrap();
           let mut downloader = Downloader::builder().download_folder(&destination).build().unwrap();
 
           Ok(
             downloader.download(&[
-              Download::new(&url).file_name(Path::new(&final_filename)).verify(Arc::new(move |path, _|
+              Download::new(&url).file_name(&destination_filename).verify(Arc::new(move |path, _|
                 // File::open(path).map(|file|
                   // if base64_hash(file) == hash {
                     Verification::Ok
@@ -364,24 +164,21 @@ fn main() {
               ))
             ]).map_or_else(|err|
               json!({ "error": err.to_string() }),
-            |result| {
-              result.iter().map(|item|
-                item.as_ref().map_err(|err| err.to_string()).map(|summary| {
-                  summary.to_string()
-                })
-              ).collect::<Vec<_>>();
+              |result| {
+                // TODO: error handling
+                /*
+                result.iter().map(|item|
+                  item.as_ref().map_err(|err| err.to_string()).map(|summary| {
+                    summary.to_string()
+                  })
+                ).collect::<Vec<_>>();
+                */
 
               json!({ "msg": { hash: name } })
             })
           )
         }
       }
-    });
-
-    time("Processed message");
-
-    result
+    })
   });
-
-  time("Done");
 }
