@@ -75,6 +75,7 @@ if (window.location.origin !== 'https://boards.4chan.org') {
 // pure; returns an input element with styling and events
 let inputElement = (index, hash, filename, url) => {
   let container = document.createElement('div')
+  container.classList.add('archive-container')
   container.style.textAlign = 'left'
 
   let input = document.createElement('input')
@@ -139,9 +140,7 @@ let inputElement = (index, hash, filename, url) => {
 
 let posts = {}
 
-// called when one or more new posts are loaded, not idempotent!
-// be sure to only call once per post
-// TODO: make this idempotent
+// called when one or more new posts with images are loaded, idempotent
 let postsChanged = async (nodes) => {
   if (nodes.length == 0) {
     return
@@ -166,7 +165,10 @@ let postsChanged = async (nodes) => {
 
     let [container, input] = inputElement(index, hash, filename, url)
 
-    node.prepend(container)
+    // not strictly idempotent but hopefully nobody else will ever mess with our container
+    if (!node.querySelector('.archive-container')) {
+      node.prepend(container)
+    }
 
     // assumption: a post with a given hash will only appear once in the page
     // should always hold since 4chan does not allow duplicate files
