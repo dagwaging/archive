@@ -47,7 +47,7 @@ chrome.runtime.onConnect.addListener((port) => {
 
       switch (message.type) {
         case 'get':
-          connection.postMessage({ "Get": { directory: items.directory } })
+          connection.postMessage({ "Get": { directory: items.directory, hashes: message.hashes } })
           break
         case 'set':
           connection.postMessage({
