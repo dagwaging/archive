@@ -80,6 +80,8 @@ let inputElement = (index, hash, filename, url) => {
 
   let input = document.createElement('input')
   input.tabIndex = index
+  input.disabled = true
+  input.placeholder = 'Loading...'
 
   let suggestion = document.createElement('div')
   suggestion.style.textAlign = 'left'
@@ -90,6 +92,8 @@ let inputElement = (index, hash, filename, url) => {
   suggestion.style.padding = suggestionPadding
 
   input.addEventListener('keyup', (event) => {
+    // technically also depends on the value of suggestions
+    // so if they change, this should too, but meh
     suggestion.textContent = getSuggestion(event.target.value)
   })
 
@@ -192,7 +196,12 @@ let getPort = () => {
   if (!port) {
     let messageListener = (message, port) => {
       if (message.error) {
-        console.log(message.error)
+        if (message.error == 'No directory set') {
+          Object.values(posts).forEach(input => { input.disabled = true })
+        }
+        else {
+          console.error(message.error)
+        }
       }
       else {
         switch (message.type) {
@@ -217,7 +226,7 @@ let getPort = () => {
       console.log('Disconnected')
 
       if (error) {
-        console.log(error)
+        console.error(error)
       }
       else {
         getPort()
@@ -234,6 +243,12 @@ let getPort = () => {
   return port
 }
 
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName == 'local' && changes.directory) {
+    Object.values(posts).forEach(input => { input.disabled = (changes.directory.newValue != null) })
+    postsChanged(document.querySelectorAll('.thread ' + postsSelector))
+  }
+})
 
 postsChanged(document.querySelectorAll('.thread ' + postsSelector))
 
@@ -242,6 +257,7 @@ new MutationObserver((mutations, observer) => {
     mutations.filter(mutation =>
       mutation.type === 'childList'
     ).flatMap(mutation =>
+      // assumption: nodes are never removed
       [...mutation.addedNodes]
     ).map(node =>
       node.querySelector(postsSelector)
