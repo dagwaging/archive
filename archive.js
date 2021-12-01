@@ -40,15 +40,15 @@ let setName = (hash, name, filename, url) => {
 // idempotent; called when the name associated with some set of file hashes has changed
 let nameChanged = (hashes) => {
   Object.entries(hashes).forEach(([hash, name]) => {
-    if (files[hash]) {
-      files[hash].value = name
-      files[hash].disabled = true
+    if (posts[hash]) {
+      posts[hash].value = name
+      posts[hash].disabled = true
     }
   })
 }
 
 
-let filesSelector = '.file'
+let postsSelector = '.file'
 let autoExpand = true
 let linkSelector = (node) => {
   return node.querySelector('.fileText a')
@@ -60,7 +60,7 @@ let suggestionLineHeight = 'normal'
 let suggestionPadding = '2px 3px'
 
 if (window.location.origin !== 'https://boards.4chan.org') {
-  filesSelector = '.thread_image_box'
+  postsSelector = '.thread_image_box'
   autoExpand = false
   linkSelector = (node) => {
     return node.parentElement.querySelector('a.post_file_filename')
@@ -105,7 +105,7 @@ let inputElement = (index, hash, filename, url) => {
 
       setName(hash, event.target.value, filename, url)
 
-      let next = [...document.querySelectorAll('.thread ' + filesSelector + ' input')].find(
+      let next = [...document.querySelectorAll('.thread ' + postsSelector + ' input')].find(
         input => input.tabIndex > index && !input.disabled
       )
       if (next) {
@@ -137,12 +137,12 @@ let inputElement = (index, hash, filename, url) => {
   return [container, input]
 }
 
-let files = {}
+let posts = {}
 
-// called when one or more new files are loaded, not idempotent!
-// be sure to only call once per file
+// called when one or more new posts are loaded, not idempotent!
+// be sure to only call once per post
 // TODO: make this idempotent
-let filesChanged = async (nodes) => {
+let postsChanged = async (nodes) => {
   if (nodes.length == 0) {
     return
   }
@@ -150,7 +150,7 @@ let filesChanged = async (nodes) => {
   let hashes = [...nodes].map((node) => {
     // assumptions: nodes is in order from top of page to bottom,
     // nodes are never added anywhere but to the bottom of the page
-    let index = document.querySelectorAll('.thread ' + filesSelector + ' input').length + 1
+    let index = document.querySelectorAll('.thread ' + postsSelector + ' input').length + 1
 
     let link = linkSelector(node)
     let filename = link?.title || link?.text
@@ -159,7 +159,7 @@ let filesChanged = async (nodes) => {
     let url = node.querySelector(imageLinkSelector)?.href
 
     // this can happen if an image was removed from an archive page
-    // TODO: pick a better filesSelector to avoid this situation?
+    // TODO: pick a better postsSelector to avoid this situation?
     if (!filename || !hash) {
       return
     }
@@ -168,9 +168,9 @@ let filesChanged = async (nodes) => {
 
     node.prepend(container)
 
-    // assumption: a file with a given hash will only appear once in the page
+    // assumption: a post with a given hash will only appear once in the page
     // should always hold since 4chan does not allow duplicate files
-    files[hash] = input
+    posts[hash] = input
 
     return hash
   }).filter(hash => hash)
@@ -233,16 +233,16 @@ let getPort = () => {
 }
 
 
-filesChanged(document.querySelectorAll('.thread ' + filesSelector))
+postsChanged(document.querySelectorAll('.thread ' + postsSelector))
 
 new MutationObserver((mutations, observer) => {
-  filesChanged(
+  postsChanged(
     mutations.filter(mutation =>
       mutation.type === 'childList'
     ).flatMap(mutation =>
       [...mutation.addedNodes]
     ).map(node =>
-      node.querySelector(filesSelector)
-    ).filter(file => file)
+      node.querySelector(postsSelector)
+    ).filter(node => node)
   )
 }).observe(document.querySelector('.thread'), { childList: true })
