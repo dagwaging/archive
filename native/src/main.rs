@@ -32,7 +32,7 @@ struct Cache {
 enum Message {
   Get {
     directory: String,
-    //cache: Cache
+    hashes: Vec<String>
   },
   Set {
     directory: String,
@@ -134,9 +134,14 @@ fn main() {
             ).unwrap_or("".to_string()) // TODO: don't emit anything if the selection was cancelled
           }))
         },
-        Message::Get { directory } => {
+        Message::Get { directory, hashes } => {
           lib::hash_files(&directory).map(|names| {
-            json!({ "msg": names })
+            json!({
+              "type": "get",
+              "msg": hashes.iter().map(|hash|
+                (hash.to_string(), names.get(hash).map(|name| name.to_string()))
+              ).collect::<HashMap<String, Option<String>>>()
+            })
           })
         },
         Message::Set { directory, url, hash, name, filename } => {
