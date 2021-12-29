@@ -1,0 +1,19 @@
+name: Create a release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  build:
+    runs-on: windows-2019
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v2
+      - name: Build extension
+        run: ./release.ps1 -Ref '${{ github.event.ref }}'
+      - name: Create release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: archive.zip
