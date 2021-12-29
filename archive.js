@@ -39,11 +39,12 @@ let setName = (hash, name, filename, url) => {
 
 // idempotent; called when the name associated with some set of file hashes has changed
 let nameChanged = (hashes) => {
-  Object.entries(hashes).forEach(([hash, name]) => {
-    if (posts[hash]) {
-      posts[hash].value = name
-      posts[hash].disabled = true
-    }
+  Object.entries(posts).forEach(([hash, input]) => {
+    let name = hashes[hash]
+
+    input.value = name != undefined ? name : ''
+    input.disabled = name != undefined
+    input.placeholder = ''
   })
 }
 
@@ -197,7 +198,10 @@ let getPort = () => {
     let messageListener = (message, port) => {
       if (message.error) {
         if (message.error == 'No directory set') {
-          Object.values(posts).forEach(input => { input.disabled = true })
+          Object.values(posts).forEach(input => {
+            input.disabled = true
+            input.placeholder = 'No directory set'
+          })
         }
         else {
           console.error(message.error)
@@ -245,7 +249,10 @@ let getPort = () => {
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName == 'local' && changes.directory) {
-    Object.values(posts).forEach(input => { input.disabled = (changes.directory.newValue != null) })
+    Object.values(posts).forEach(input => {
+      input.disabled = changes.directory.newValue != null
+      input.placeholder = changes.directory.newValue != null ? '' : 'No directory set'
+    })
     postsChanged(document.querySelectorAll('.thread ' + postsSelector))
   }
 })
