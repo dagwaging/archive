@@ -27,6 +27,7 @@ impl Arbitrary for LegalPath {
 }
 
 #[quickcheck]
+#[ignore]
 fn test(
   mut cache: HashMap<LegalPath, HashMap<LegalPath, String>>,
   mut changes: HashMap<LegalPath, Option<HashMap<LegalPath, Option<String>>>>
