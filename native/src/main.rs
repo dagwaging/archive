@@ -1,5 +1,5 @@
 #![cfg_attr(debug_assertions, allow(dead_code, unused, unused_imports, unused_variables))]
-// #![windows_subsystem = "windows"]
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use chrome_native_messaging::event_loop;
 use serde::Deserialize;
