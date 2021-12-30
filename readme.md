@@ -22,6 +22,13 @@ A simple extension for quickly mass-archiving and organizing images from threads
 3. Press enter to save the image. Images will be saved with their original filename, to the `archive folder` you specified in the extension options, within the `subfolder` you entered. The extension will then jump to the next post with an image.
 4. Press `tab` to skip any images you don't want to archive
 
+## Updating
+
+1. Download the updated extension from [the releases page](https://github.com/dagwaging/archive/releases/latest)
+2. Extract the new `archive.zip` to the same folder you initially extracted it to
+3. Open the [Chrome Extension page](chrome://extensions/) and click the refresh arrow on the `4chan image archiver` extension
+4. Reload any open threads
+
 ## Uninstallation
 
 1. Open the extension's [Chrome Extension page](chrome://extensions/?id=fdnmnpnjacfjphfmhlfgjpmkimbekmnd)
