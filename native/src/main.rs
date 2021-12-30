@@ -209,8 +209,18 @@ fn main() {
                       })
                     ).collect::<Vec<_>>();
                     */
+                  send_message(
+                    io::stdout(),
+                    &json!({
+                      "type": "suggestions",
+                      "msg": [name]
+                    })
+                  ).unwrap();
 
-                  json!({ "msg": { hash: name } })
+                  json!({
+                    "type": "get",
+                    "msg": { hash: name }
+                  })
                 })
               )
             }
