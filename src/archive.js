@@ -23,17 +23,19 @@ let suggestionsAdded = (newSuggestions) => {
 
 
 // idempotent; call to change the name associated with a file hash
-let setName = (hash, name, filename, url) => {
+let setName = (hash, name, original_filename, filename, url) => {
   if (name.length > 0) {
-    getPort().postMessage(
-      {
-        type: 'set',
-        hash: hash,
-        name: name,
-        filename: filename,
-        url: url
-      }
-    )
+    chrome.storage.local.get('original_filename', (items) => {
+      getPort().postMessage(
+        {
+          type: 'set',
+          hash: hash,
+          name: name,
+          filename: (items.original_filename === undefined || items.original_filename) ? original_filename : filename,
+          url: url
+        }
+      )
+    })
   }
 }
 
@@ -74,7 +76,7 @@ if (window.location.origin !== 'https://boards.4chan.org') {
 }
 
 // pure; returns an input element with styling and events
-let inputElement = (index, hash, filename, url) => {
+let inputElement = (index, hash, original_filename, filename, url) => {
   let container = document.createElement('div')
   container.classList.add('archive-container')
   container.style.textAlign = 'left'
@@ -109,7 +111,7 @@ let inputElement = (index, hash, filename, url) => {
     if (event.which === 13) {
       event.preventDefault()
 
-      setName(hash, event.target.value, filename, url)
+      setName(hash, event.target.value, original_filename, filename, url)
 
       let next = [...document.querySelectorAll('.thread ' + postsSelector + ' input')].find(
         input => input.tabIndex > index && !input.disabled
@@ -157,18 +159,19 @@ let postsChanged = async (nodes) => {
     let index = document.querySelectorAll('.thread ' + postsSelector + ' input').length + 1
 
     let link = linkSelector(node)
-    let filename = link?.title || link?.text
+    let original_filename = link?.title || link?.text
+    let filename = link?.pathname.split('/').at(-1)
 
     let hash = node.querySelector(hashSelector)?.getAttribute('data-md5')
     let url = node.querySelector(imageLinkSelector)?.href
 
     // this can happen if an image was removed from an archive page
     // TODO: pick a better postsSelector to avoid this situation?
-    if (!filename || !hash) {
+    if (!original_filename || !filename || !hash) {
       return
     }
 
-    let [container, input] = inputElement(index, hash, filename, url)
+    let [container, input] = inputElement(index, hash, original_filename, filename, url)
 
     // not strictly idempotent but hopefully nobody else will ever mess with our container
     if (!node.querySelector('.archive-container')) {
