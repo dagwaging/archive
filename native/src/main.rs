@@ -1,7 +1,7 @@
 #![cfg_attr(debug_assertions, allow(dead_code, unused, unused_imports, unused_variables))]
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use chrome_native_messaging::event_loop;
+use chrome_native_messaging::{read_input, send, send_message, Error};
 use serde::Deserialize;
 use serde_json::json;
 use std::fs;
@@ -9,8 +9,10 @@ use std::sync::Arc;
 use std::path::Path;
 use std::path::PathBuf;
 use std::time;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::process;
+use std::io;
+use std::panic;
 use exitcode;
 use downloader::verify::Verification;
 use downloader::Downloader;
@@ -64,6 +66,23 @@ fn unique_filename(filename: &Path) -> Option<PathBuf> {
   Some(final_filename)
 }
 
+// taken from https://github.com/neon64/chrome-native-messaging/blob/master/src/lib.rs#L130-L144
+fn handle_panic(info: &std::panic::PanicInfo) {
+  let msg = match info.payload().downcast_ref::<&'static str>() {
+    Some(s) => *s,
+    None => match info.payload().downcast_ref::<String>() {
+      Some(s) => &s[..],
+      None => "Box<Any>",
+    }
+  };
+  send!({
+    "status": "panic",
+    "payload": msg,
+    "file": info.location().map(|l| l.file()),
+    "line": info.location().map(|l| l.line())
+  });
+}
+
 fn main() {
   unsafe {
     winuser::SetProcessDpiAwarenessContext(
@@ -114,76 +133,101 @@ fn main() {
     process::exit(exit_code);
   }
 
-  event_loop(|message| {
-    serde_json::from_value::<Message>(message).map_err(|error|
-      format!("Invalid message: {}", error)
-    ).and_then(|en| {
-      match en {
-        Message::Pick => {
-          Ok(json!({
-            "msg": wfd::open_dialog(
-              wfd::DialogParams {
-                options: wfd::FOS_PICKFOLDERS,
-                title: "Pick archive location",
-                ..Default::default()
-              }
-            ).ok().and_then(|result|
-              result.selected_file_path.to_str().map(|path|
-                path.to_string()
-              ) // TODO: display an error and retry if the path is not valid UTF-8?
-            ).unwrap_or("".to_string()) // TODO: don't emit anything if the selection was cancelled
-          }))
-        },
-        Message::Get { directory, hashes } => {
-          lib::hash_files(&directory).map(|names| {
-            json!({
-              "type": "get",
-              "msg": hashes.iter().map(|hash|
-                (hash.to_string(), names.get(hash).map(|name| name.to_string()))
-              ).collect::<HashMap<String, Option<String>>>()
-            })
-          })
-        },
-        Message::Set { directory, url, hash, name, filename } => {
-          if lib::hash_files(&directory).unwrap_or_default().get(&hash).map(|found_name| found_name.to_string() == name).unwrap_or(false) {
-            return Ok(json!({ "msg": { hash: name } }))
-          }
+  panic::set_hook(Box::new(handle_panic));
 
-          let destination = Path::new(&directory).join(&name);
-          fs::create_dir_all(&destination).unwrap();
-
-          let destination_filename = unique_filename(&destination.join(filename)).unwrap();
-          let mut downloader = Downloader::builder().download_folder(&destination).build().unwrap();
-
-          Ok(
-            downloader.download(&[
-              Download::new(&url).file_name(&destination_filename).verify(Arc::new(move |path, _|
-                // File::open(path).map(|file|
-                  // if base64_hash(file) == hash {
-                    Verification::Ok
-                  // }
-                  // else {
-                    // Verification::Failed
-                  // }
-                // ).unwrap_or(Verification::Failed)
-              ))
-            ]).map_or_else(|err|
-              json!({ "error": err.to_string() }),
-              |result| {
-                // TODO: error handling
-                /*
-                result.iter().map(|item|
-                  item.as_ref().map_err(|err| err.to_string()).map(|summary| {
-                    summary.to_string()
+  loop {
+    match read_input(io::stdin()) {
+      Ok(message) => {
+        let result = serde_json::from_value::<Message>(message).map_err(|error|
+          format!("Invalid message: {}", error)
+        ).and_then(|en| {
+          match en {
+            Message::Pick => {
+              Ok(json!({
+                "msg": wfd::open_dialog(
+                  wfd::DialogParams {
+                    options: wfd::FOS_PICKFOLDERS,
+                    title: "Pick archive location",
+                    ..Default::default()
+                  }
+                ).ok().and_then(|result|
+                  result.selected_file_path.to_str().map(|path|
+                    path.to_string()
+                  ) // TODO: display an error and retry if the path is not valid UTF-8?
+                ).unwrap_or("".to_string()) // TODO: don't emit anything if the selection was cancelled
+              }))
+            },
+            Message::Get { directory, hashes } => {
+              lib::hash_files(&directory).map(|names| {
+                send_message(
+                  io::stdout(),
+                  &json!({
+                    "type": "suggestions",
+                    "msg": names.values().collect::<HashSet<&String>>()
                   })
-                ).collect::<Vec<_>>();
-                */
+                ).unwrap();
 
-              json!({ "msg": { hash: name } })
-            })
-          )
+                json!({
+                  "type": "get",
+                  "msg": hashes.iter().map(|hash|
+                    (hash.to_string(), names.get(hash).map(|name| name.to_string()))
+                  ).collect::<HashMap<String, Option<String>>>()
+                })
+              })
+            },
+            Message::Set { directory, url, hash, name, filename } => {
+              if lib::hash_files(&directory).unwrap_or_default().get(&hash).map(|found_name| found_name.to_string() == name).unwrap_or(false) {
+                return Ok(json!({ "msg": { hash: name } }))
+              }
+
+              let destination = Path::new(&directory).join(&name);
+              fs::create_dir_all(&destination).unwrap();
+
+              let destination_filename = unique_filename(&destination.join(filename)).unwrap();
+              let mut downloader = Downloader::builder().download_folder(&destination).build().unwrap();
+
+              Ok(
+                downloader.download(&[
+                  Download::new(&url).file_name(&destination_filename).verify(Arc::new(move |path, _|
+                    // File::open(path).map(|file|
+                      // if base64_hash(file) == hash {
+                        Verification::Ok
+                      // }
+                      // else {
+                        // Verification::Failed
+                      // }
+                    // ).unwrap_or(Verification::Failed)
+                  ))
+                ]).map_or_else(|err|
+                  json!({ "error": err.to_string() }),
+                  |result| {
+                    // TODO: error handling
+                    /*
+                    result.iter().map(|item|
+                      item.as_ref().map_err(|err| err.to_string()).map(|summary| {
+                        summary.to_string()
+                      })
+                    ).collect::<Vec<_>>();
+                    */
+
+                  json!({ "msg": { hash: name } })
+                })
+              )
+            }
+          }
+        });
+
+        match result {
+          Ok(response) => send_message(io::stdout(), &response).unwrap(),
+          Err(error) => send!({ "error": format!("{}", error) })
         }
-      }
-    })
-  });
+      },
+      Err(Error::NoMoreInput) => {
+        break;
+      },
+      Err(error) => {
+        send!({ "error": format!("{}", error) });
+      },
+    }
+  }
 }
