@@ -19,15 +19,7 @@ chrome.runtime.onConnect.addListener((port) => {
       port.postMessage({ error: error })
     }
     else {
-      message.type = 'get'
       port.postMessage(message)
-
-      if (message.msg) {
-        port.postMessage({
-          type: 'suggestions',
-          msg: [...new Set(Object.values(message.msg))]
-        })
-      }
     }
   }
 
