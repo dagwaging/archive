@@ -3,8 +3,16 @@ let connection = null
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName == 'local' && changes.directory) {
-    // our cache is probably invalid, we should eagerly rehash everything
     console.log(changes.directory.newValue)
+
+    if (changes.directory.newValue) {
+      if (!connection) {
+        connection = chrome.runtime.connectNative('com.dagwaging.archive')
+      }
+
+      // our cache is probably invalid, we should eagerly rehash everything
+      connection.postMessage({ "Get": { directory: changes.directory.newValue, hashes: [] } })
+    }
   }
 })
 
