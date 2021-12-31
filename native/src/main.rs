@@ -1,8 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use chrome_native_messaging::{read_input, send, send_message, Error};
-use serde::Deserialize;
-use serde_json::json;
+use chrome_native_messaging::{read_input, send_message, Error};
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::sync::Arc;
 use std::path::Path;
@@ -43,7 +42,24 @@ enum Message {
     name: String,
     filename: String,
   },
-  Pick
+  Pick,
+}
+
+#[derive(Serialize)]
+#[serde(tag="type", rename_all="lowercase")]
+enum Response {
+  Get {
+    msg: HashMap<String, Option<String>>,
+  },
+  Suggestions {
+    msg: HashSet<String>,
+  },
+  Pick {
+    msg: String,
+  },
+  Error {
+    error: String,
+  },
 }
 
 // vulnerable to a race condition since we can't pass in a file to downloader.download()
@@ -75,12 +91,18 @@ fn handle_panic(info: &std::panic::PanicInfo) {
       None => "Box<Any>",
     }
   };
-  send!({
-    "status": "panic",
-    "payload": msg,
-    "file": info.location().map(|l| l.file()),
-    "line": info.location().map(|l| l.line())
-  });
+
+  send_message(
+    io::stdout(),
+    &Response::Error {
+      error: format!(
+        "Panic:\n{}\n{}\n{}",
+        msg,
+        info.location().map_or("", |l| l.file()),
+        info.location().map_or("".to_string(), |l| format!("{}", l.line()))
+      )
+    }
+  ).unwrap();
 }
 
 fn main() {
@@ -143,8 +165,8 @@ fn main() {
         ).and_then(|en| {
           match en {
             Message::Pick => {
-              Ok(json!({
-                "msg": wfd::open_dialog(
+              Ok(Response::Pick {
+                msg: wfd::open_dialog(
                   wfd::DialogParams {
                     options: wfd::FOS_PICKFOLDERS,
                     title: "Pick archive location",
@@ -155,29 +177,27 @@ fn main() {
                     path.to_string()
                   ) // TODO: display an error and retry if the path is not valid UTF-8?
                 ).unwrap_or("".to_string()) // TODO: don't emit anything if the selection was cancelled
-              }))
+              })
             },
             Message::Get { directory, hashes } => {
               lib::hash_files(&directory).map(|names| {
                 send_message(
                   io::stdout(),
-                  &json!({
-                    "type": "suggestions",
-                    "msg": names.values().collect::<HashSet<&String>>()
-                  })
+                  &Response::Suggestions {
+                    msg: names.values().cloned().collect::<HashSet<String>>()
+                  }
                 ).unwrap();
 
-                json!({
-                  "type": "get",
-                  "msg": hashes.iter().map(|hash|
+                Response::Get {
+                  msg: hashes.iter().map(|hash|
                     (hash.to_string(), names.get(hash).map(|name| name.to_string()))
                   ).collect::<HashMap<String, Option<String>>>()
-                })
+                }
               })
             },
             Message::Set { directory, url, hash, name, filename } => {
               if lib::hash_files(&directory).unwrap_or_default().get(&hash).map(|found_name| found_name.to_string() == name).unwrap_or(false) {
-                return Ok(json!({ "msg": { hash: name } }))
+                return Ok(Response::Get { msg: HashMap::from([(hash, Some(name))]) })
               }
 
               let destination = Path::new(&directory).join(&name);
@@ -211,16 +231,14 @@ fn main() {
                     */
                   send_message(
                     io::stdout(),
-                    &json!({
-                      "type": "suggestions",
-                      "msg": [name]
-                    })
+                    &Response::Suggestions {
+                      msg: HashSet::from([name.clone()])
+                    }
                   ).unwrap();
 
-                  json!({
-                    "type": "get",
-                    "msg": { hash: name }
-                  })
+                  Response::Get {
+                    msg: HashMap::from([(hash, Some(name))])
+                  }
                 })
               )
             }
@@ -229,14 +247,24 @@ fn main() {
 
         match result {
           Ok(response) => send_message(io::stdout(), &response).unwrap(),
-          Err(error) => send!({ "error": format!("{}", error) })
+          Err(error) => send_message(
+            io::stdout(),
+            &Response::Error {
+              error: error
+            }
+          ).unwrap()
         }
       },
       Err(Error::NoMoreInput) => {
         break;
       },
       Err(error) => {
-        send!({ "error": format!("{}", error) });
+        send_message(
+          io::stdout(),
+          &Response::Error {
+            error: format!("{}", error)
+          }
+        ).unwrap()
       },
     }
   }
