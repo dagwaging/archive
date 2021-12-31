@@ -1,4 +1,3 @@
-#![cfg_attr(debug_assertions, allow(dead_code, unused, unused_imports, unused_variables))]
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use chrome_native_messaging::{read_input, send, send_message, Error};
@@ -24,6 +23,7 @@ use user32;
 mod extension;
 mod lib;
 
+#[allow(dead_code)]
 #[derive(Deserialize)]
 struct Cache {
   as_of: time::SystemTime,
@@ -188,7 +188,7 @@ fn main() {
 
               Ok(
                 downloader.download(&[
-                  Download::new(&url).file_name(&destination_filename).verify(Arc::new(move |path, _|
+                  Download::new(&url).file_name(&destination_filename).verify(Arc::new(move |_path, _|
                     // File::open(path).map(|file|
                       // if base64_hash(file) == hash {
                         Verification::Ok
@@ -199,8 +199,8 @@ fn main() {
                     // ).unwrap_or(Verification::Failed)
                   ))
                 ]).map_or_else(|err|
-                  json!({ "error": err.to_string() }),
-                  |result| {
+                  Response::Error { error: err.to_string() },
+                  |_result| {
                     // TODO: error handling
                     /*
                     result.iter().map(|item|

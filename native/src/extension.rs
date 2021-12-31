@@ -54,7 +54,7 @@ pub fn install(name: &str, description: &str, extension_id: &str) -> Result<(), 
     "path": exe_path,
     "type": "stdio",
     "allowed_origins": [format!("chrome-extension://{}/", extension_id)]
-  }));
+  }))?;
 
   let (key, _) = winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER).create_subkey(
     &Path::new(&format!("{}{}", NATIVE_MESSAGING_REGISTRY_KEY, name))
