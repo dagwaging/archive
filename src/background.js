@@ -18,6 +18,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 
 chrome.runtime.onConnect.addListener((port) => {
   if (!connection) {
+    // TODO: if chrome is unable to communicate with the native host, this will silently fail
     connection = chrome.runtime.connectNative('com.dagwaging.archive')
   }
 
@@ -41,25 +42,32 @@ chrome.runtime.onConnect.addListener((port) => {
 
     chrome.storage.local.get('directory', (items) => {
       if (!items.directory) {
-        port.postMessage({ error: 'No directory set' })
+        port.postMessage({ error: 'No directory set', detail: 'Go to the archive extension options page to set an archive directory' })
         return
       }
 
-      switch (message.type) {
-        case 'get':
-          connection.postMessage({ "Get": { directory: items.directory, hashes: message.hashes } })
-          break
-        case 'set':
-          connection.postMessage({
-            "Set": {
-              directory: items.directory,
-              url: message.url,
-              hash: message.hash,
-              name: message.name,
-              filename: message.filename
-            }
-          })
-          break
+      try {
+        switch (message.type) {
+          case 'get':
+            connection.postMessage({ "Get": { directory: items.directory, hashes: message.hashes } })
+            break
+          case 'set':
+            connection.postMessage({
+              "Set": {
+                directory: items.directory,
+                url: message.url,
+                hash: message.hash,
+                name: message.name,
+                filename: message.filename
+              }
+            })
+            break
+        }
+      }
+      catch (error) {
+        connection = null
+        port.postMessage({ error: 'Extension not configured', detail: 'Run archive.exe to configure the extension' })
+        return
       }
     })
   })

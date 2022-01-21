@@ -202,15 +202,11 @@ let getPort = () => {
   if (!port) {
     let messageListener = (message, port) => {
       if (message.error) {
-        if (message.error == 'No directory set') {
-          Object.values(posts).forEach(input => {
-            input.disabled = true
-            input.placeholder = 'No directory set'
-          })
-        }
-        else {
-          console.error(message.error)
-        }
+        Object.values(posts).forEach(input => {
+          input.disabled = true
+          input.placeholder = message.error
+          input.title = message.detail
+        })
       }
       else {
         switch (message.type) {
