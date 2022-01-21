@@ -41,12 +41,14 @@ let setName = (hash, name, original_filename, filename, url) => {
 
 // idempotent; called when the name associated with some set of file hashes has changed
 let nameChanged = (hashes) => {
-  Object.entries(posts).forEach(([hash, input]) => {
-    let name = hashes[hash]
+  Object.entries(hashes).forEach(([hash, name]) => {
+    let input = posts[hash]
 
-    input.value = name != undefined ? name : ''
-    input.disabled = name != undefined
-    input.placeholder = ''
+    if (input) {
+      input.value = name != null ? name : ''
+      input.disabled = name != null
+      input.placeholder = ''
+    }
   })
 }
 
